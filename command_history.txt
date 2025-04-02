@@ -1,0 +1,67 @@
+    1  ls
+    2  cd pkgs
+    3  ls
+    4  cd ../
+    5  cd mdk
+    6  ls
+    7  cd catkin_ws/
+    8  ls
+    9  cd ../
+   10  cd
+   11  ls
+   12  cd catkin_ws/src/
+   13  ls
+   14  git clone https://github.com/Arichmond25/COM3528_2025_Team1.git
+   15  ls
+   16  cd COM3528_2025_Team1/
+   17  ls
+   18  roscore
+   19  miro_sim
+   20  cd
+   21  cd catkin_ws/src/
+   22  git clone https://github.com/AlexandrLucas/COM3528
+   23  ls
+   24  cd COM3528
+   25  ls
+   26  miro_sim
+   27  source ~/mdk/setup.bash
+   28  miro_sim
+   29  roscore
+   30  ls
+   31  cd catkin_ws/src/COM3528
+   32  cd ../
+   33  cd COM3528_2025_Team1/
+   34  ls
+   35  rm -r detection/
+   36  rm -r src/
+   37  cd ../
+   38  catkin_create_pkg beginner_tutorials std_msgs rospy roscpp
+   39  catkin_create_pkg COM3528_2025_Team1 std_msgs rospy roscpp
+   40  catkin build
+   41  src
+   42  rosrun com3528_examples kick_blue_ball.py
+   43  roscore
+   44  miro_sim
+   45  miro_gui
+   46  pip show miro2
+   47  miro_gui
+   48  cd
+   49  src
+   50  robot_mode
+   51  robot_mode sim
+   52  miro_sim
+   53  src
+   54  miro_sim
+   55  source
+   56  source ~/mdk/setup.bash
+   57  miro_sim
+   58  roscore
+   59  catkin build
+   60  cd catkin_ws/src/
+   61  ls
+   62  catkin build
+   63  cd
+   64  cd mdk/catkin_ws/src/
+   65  ls
+   66  catkin build
+   67  miro_sim
