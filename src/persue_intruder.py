@@ -1,15 +1,64 @@
-#!/usr/bin/env python3
+# Imports
 import os
-import rospy            # ROS Python interface
-from geometry_msgs.msg import TwistStamped
-import cv2  # Computer Vision library
+import subprocess
 from math import radians  # This is used to reset the head pose
 import numpy as np  # Numerical Analysis library
+import cv2  # Computer Vision library
 
-class MovementPublisher(object):
+import rospy  # ROS Python interface
+from sensor_msgs.msg import CompressedImage  # ROS CompressedImage message
+from sensor_msgs.msg import JointState  # ROS joints state message
+from cv_bridge import CvBridge, CvBridgeError  # ROS -> OpenCV converter
+from geometry_msgs.msg import TwistStamped  # ROS cmd_vel (velocity control) message
 
+import miro2 as miro  # Import MiRo Developer Kit library
+
+try:  # For convenience, import this util separately
+    from miro2.lib import wheel_speed2cmd_vel  # Python 3
+except ImportError:
+    from miro2.utils import wheel_speed2cmd_vel  # Python 2
+
+class MiroClient:
     """
-        The following code will move the MiRo
+    Script settings below
+    """
+    ##########################
+    TICK = 0.02  # This is the update interval for the main control loop in secs
+    CAM_FREQ = 1  # Number of ticks before camera gets a new frame, increase in case of network lag
+    SLOW = 0.1  # Radial speed when turning on the spot (rad/s)
+    FAST = 0.4  # Linear speed when kicking the ball (m/s)
+    DEBUG = False # Set to True to enable debug views of the cameras
+    TRANSLATION_ONLY = False # Whether to rotate only
+    IS_MIROCODE = False  # Set to True if running in MiRoCODE
+
+    # formatting order
+    PREPROCESSING_ORDER = ["edge", "smooth", "color", "gaussian"]
+        # set to empty to not preprocess or add the methods in the order you want to implement.
+        # "edge" to use edge detection, "gaussian" to use difference gaussian
+        # "color" to use color segmentation, "smooth" to use smooth blurring,
+
+    # color segmentation format
+    HSV = True  # if true select a color which will convert to hsv format with a range of its own, else you can select your own rgb range
+    f = lambda x: int(0) if (x < 0) else (int(255) if x > 255 else int(x))
+    COLOR_HSV = [f(0), f(0), f(255)]     # target color which will be converted to hsv for processing, format BGR
+    COLOR_LOW = (f(0), f(0), f(180))         # low color segment, format BGR
+    COLOR_HIGH = (f(255), f(255), f(255))  # high color segment, format BGR
+
+    # edge detection format
+    INTENSITY_LOW = 50   # min 0, max 500
+    INTENSITY_HIGH = 50  # min 0, max 500
+
+    # smoothing_blurring
+    GAUSSIAN_BLURRING = False
+    KERNEL_SIZE = 15         # min 3, max 15
+    STANDARD_DEVIATION = 0  # min 0.1, max 4.9
+
+    # difference gaussian
+    DIFFERENCE_SD_LOW = 1.5 # min 0.00, max 1.40
+    DIFFERENCE_SD_HIGH = 0 # min 0.00, max 1.40
+    ##########################
+    """
+    End of script settings
     """
 
     def drive(self, speed_l=0.1, speed_r=0.1):  # (m/sec, m/sec)
@@ -277,34 +326,3 @@ class MovementPublisher(object):
     """ ----------------------------
     # !!!! ALL FUNCTION ABOVE ARE NOT FINAL AND WILL BE DUE TO CHANGE
      ---------------------------- """
-
-    def __init__(self):
-        rospy.init_node("movement_publisher")
-        topic_base_name = "/" + os.getenv("MIRO_ROBOT_NAME")
-        self.vel_pub = rospy.Publisher(
-            topic_base_name + "/control/cmd_vel", TwistStamped, queue_size=0
-        )
-        # Clean-up
-        rospy.on_shutdown(self.shutdown_hook)
-
-    # linear is to move straight and angular is to turn
-    def set_move_cmd(self, linear = 0.0, angular = 0.0):
-        vel_cmd = TwistStamped()
-        # explanation of the messages in the document
-        # message variable to move forward is done by linear.x
-        vel_cmd.twist.linear.x = linear
-        # message variable to turn is done by angular.z
-        vel_cmd.twist.angular.z = angular
-        self.vel_pub.publish(vel_cmd)
-
-    def shutdown_hook(self):
-        # Stop moving
-        self.set_move_cmd()
-
-if __name__ == '__main__':
-    movement = MovementPublisher()
-
-    while not rospy.is_shutdown():
-        # Makes MiRo move in circles
-        movement.set_move_cmd(linear=0.1, angular=0.6)
-        rospy.sleep(0.02)
