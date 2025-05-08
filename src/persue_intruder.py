@@ -18,7 +18,7 @@ try:  # For convenience, import this util separately
 except ImportError:
     from miro2.utils import wheel_speed2cmd_vel  # Python 2
 
-class MiroClient:
+class MiRoClient:
     """
     Script settings below
     """
@@ -81,6 +81,34 @@ class MiroClient:
     """ ----------------------------
     # !!!! ALL FUNCTION BELOW ARE NOT FINAL AND WILL BE DUE TO CHANGE
      ---------------------------- """
+    
+    def callback_caml(self, ros_image):  # Left camera
+        self.callback_cam(ros_image, 0)
+
+    def callback_camr(self, ros_image):  # Right camera
+        self.callback_cam(ros_image, 1)
+
+    def callback_cam(self, ros_image, index):
+        """
+        Callback function executed upon image arrival
+        """
+        # Silently(-ish) handle corrupted JPEG frames
+        try:
+            # Convert compressed ROS image to raw CV image
+            image = self.image_converter.compressed_imgmsg_to_cv2(ros_image, "rgb8")
+            # Convert from OpenCV's default BGR to RGB
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            # Store image as class attribute for further use
+            self.input_camera[index] = image
+            # Get image dimensions
+            self.frame_height, self.frame_width, channels = image.shape
+            self.x_centre = self.frame_width / 2.0
+            self.y_centre = self.frame_height / 2.0
+            # Raise the flag: A new frame is available for processing
+            self.new_frame[index] = True
+        except CvBridgeError as e:
+            # Ignore corrupted frames
+            pass
 
     def look_for_invader(self):
         """
@@ -323,14 +351,94 @@ class MiroClient:
 
         # Return a list values [x, y, r] for the largest circle
         return [max_circle[0], max_circle[1], max_circle[2]]
+    
+    def __init__(self):
+        # Initialise a new ROS node to communicate with MiRo, if needed
+        if not self.IS_MIROCODE:
+            rospy.init_node("persue_intruder", anonymous=True)
+        # Give it some time to make sure everything is initialised
+        rospy.sleep(2.0)
+        # Initialise CV Bridge
+        self.image_converter = CvBridge()
+        # Individual robot name acts as ROS topic prefix
+        topic_base_name = "/" + os.getenv("MIRO_ROBOT_NAME")
+        # Create two new subscribers to receive camera images with attached callbacks
+        self.sub_caml = rospy.Subscriber(
+            topic_base_name + "/sensors/caml/compressed",
+            CompressedImage,
+            self.callback_caml,
+            queue_size=1,
+            tcp_nodelay=True,
+        )
+        self.sub_camr = rospy.Subscriber(
+            topic_base_name + "/sensors/camr/compressed",
+            CompressedImage,
+            self.callback_camr,
+            queue_size=1,
+            tcp_nodelay=True,
+        )
+        # Create a new publisher to send velocity commands to the robot
+        self.vel_pub = rospy.Publisher(
+            topic_base_name + "/control/cmd_vel", TwistStamped, queue_size=0
+        )
+        # Create a new publisher to move the robot head
+        self.pub_kin = rospy.Publisher(
+            topic_base_name + "/control/kinematic_joints", JointState, queue_size=0
+        )
+        # Create handle to store images
+        self.input_camera = [None, None]
+        # New frame notification
+        self.new_frame = [False, False]
+        # Create variable to store a list of ball's x, y, and r values for each camera
+        self.ball = [None, None]
+        # Set the default frame width (gets updated on receiving an image)
+        self.frame_width = 640
+        # Action selector to reduce duplicate printing to the terminal
+        self.just_switched = True
+        # Bookmark
+        self.bookmark = 0
+        # Move the head to default pose
+        self.reset_head_pose()
+    
+    def loop(self):
+        """
+        Main control loop
+        """
+        print("MiRo plays ball, press CTRL+C to halt...")
+        # Main control loop iteration counter
+        self.counter = 0
+        # This switch loops through MiRo behaviours:
+        # Find ball, lock on to the ball and kick ball
+        self.status_code = 0
+        while not rospy.core.is_shutdown():
+
+            # Step 1. Find ball
+            if self.status_code == 1:
+                # Every once in a while, look for ball
+                if self.counter % self.CAM_FREQ == 0:
+                    self.look_for_invader()
+
+            # Step 2. Orient towards it
+            elif self.status_code == 2:
+                self.lock_onto_invader()
+
+            # Step 3. Kick!
+            elif self.status_code == 3:
+                self.persue()
+
+            # Fall back
+            else:
+                self.status_code = 1
+
+            # Yield
+            self.counter += 1
+            rospy.sleep(self.TICK)
+
     """ ----------------------------
     # !!!! ALL FUNCTION ABOVE ARE NOT FINAL AND WILL BE DUE TO CHANGE
      ---------------------------- """
 
-if __name__ == '__main__':
-    movement = MiroClient()
-
-    while not rospy.is_shutdown():
-        # Makes MiRo move in circles
-        movement.look_for_invader()
-        rospy.sleep(0.02)
+# This condition fires when the script is called directly
+if __name__ == "__main__":
+    main = MiRoClient()  # Instantiate class
+    main.loop()  # Run the main control loop
