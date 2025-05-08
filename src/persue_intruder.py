@@ -326,3 +326,11 @@ class MiroClient:
     """ ----------------------------
     # !!!! ALL FUNCTION ABOVE ARE NOT FINAL AND WILL BE DUE TO CHANGE
      ---------------------------- """
+
+if __name__ == '__main__':
+    movement = MiroClient()
+
+    while not rospy.is_shutdown():
+        # Makes MiRo move in circles
+        movement.look_for_invader()
+        rospy.sleep(0.02)
