@@ -1,444 +1,116 @@
-# Imports
-import os
-import subprocess
-from math import radians  # This is used to reset the head pose
-import numpy as np  # Numerical Analysis library
-import cv2  # Computer Vision library
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 
-import rospy  # ROS Python interface
-from sensor_msgs.msg import CompressedImage  # ROS CompressedImage message
-from sensor_msgs.msg import JointState  # ROS joints state message
-from cv_bridge import CvBridge, CvBridgeError  # ROS -> OpenCV converter
-from geometry_msgs.msg import TwistStamped  # ROS cmd_vel (velocity control) message
+"""
+This script makes MiRo patrol and pursue a red-collared intruder robot using HSV-based red detection.
+Inspired by the modular state machine structure of kick_blue_ball.py
+"""
 
-import miro2 as miro  # Import MiRo Developer Kit library
+import rospy
+import cv2
+import numpy as np
+from sensor_msgs.msg import CompressedImage
+from geometry_msgs.msg import TwistStamped
+from cv_bridge import CvBridge
 
-try:  # For convenience, import this util separately
-    from miro2.lib import wheel_speed2cmd_vel  # Python 3
-except ImportError:
-    from miro2.utils import wheel_speed2cmd_vel  # Python 2
+# State Constants
+STATE_DETECT = 0
+STATE_LOCK = 1
+STATE_CHASE = 2
+STATE_PATROL = 3
 
-class MiRoClient:
-    """
-    Script settings below
-    """
-    ##########################
-    TICK = 0.02  # This is the update interval for the main control loop in secs
-    CAM_FREQ = 1  # Number of ticks before camera gets a new frame, increase in case of network lag
-    SLOW = 0.1  # Radial speed when turning on the spot (rad/s)
-    FAST = 0.4  # Linear speed when kicking the ball (m/s)
-    DEBUG = False # Set to True to enable debug views of the cameras
-    TRANSLATION_ONLY = False # Whether to rotate only
-    IS_MIROCODE = False  # Set to True if running in MiRoCODE
+class MiRoPatrol:
+    TICK = 0.1  # seconds
+    CAM_FREQ = 5
+    LINEAR_SPEED = 0.05
+    ANGULAR_GAIN = 0.002
+    DEBUG = False
 
-    # formatting order
-    PREPROCESSING_ORDER = ["edge", "smooth", "color", "gaussian"]
-        # set to empty to not preprocess or add the methods in the order you want to implement.
-        # "edge" to use edge detection, "gaussian" to use difference gaussian
-        # "color" to use color segmentation, "smooth" to use smooth blurring,
-
-    # color segmentation format
-    HSV = True  # if true select a color which will convert to hsv format with a range of its own, else you can select your own rgb range
-    f = lambda x: int(0) if (x < 0) else (int(255) if x > 255 else int(x))
-    COLOR_HSV = [f(0), f(0), f(255)]     # target color which will be converted to hsv for processing, format BGR
-    COLOR_LOW = (f(0), f(0), f(180))         # low color segment, format BGR
-    COLOR_HIGH = (f(255), f(255), f(255))  # high color segment, format BGR
-
-    # edge detection format
-    INTENSITY_LOW = 50   # min 0, max 500
-    INTENSITY_HIGH = 50  # min 0, max 500
-
-    # smoothing_blurring
-    GAUSSIAN_BLURRING = False
-    KERNEL_SIZE = 15         # min 3, max 15
-    STANDARD_DEVIATION = 0  # min 0.1, max 4.9
-
-    # difference gaussian
-    DIFFERENCE_SD_LOW = 1.5 # min 0.00, max 1.40
-    DIFFERENCE_SD_HIGH = 0 # min 0.00, max 1.40
-    ##########################
-    """
-    End of script settings
-    """
-
-    def drive(self, speed_l=0.1, speed_r=0.1):  # (m/sec, m/sec)
-        """
-        Wrapper to simplify driving MiRo by converting wheel speeds to cmd_vel
-        """
-        # Prepare an empty velocity command message
-        msg_cmd_vel = TwistStamped()
-
-        # Desired wheel speed (m/sec)
-        wheel_speed = [speed_l, speed_r]
-
-        # Convert wheel speed to command velocity (m/sec, Rad/sec)
-        (dr, dtheta) = wheel_speed2cmd_vel(wheel_speed)
-
-        # Update the message with the desired speed
-        msg_cmd_vel.twist.linear.x = dr
-        msg_cmd_vel.twist.angular.z = dtheta
-
-    """ ----------------------------
-    # !!!! ALL FUNCTION BELOW ARE NOT FINAL AND WILL BE DUE TO CHANGE
-     ---------------------------- """
-    
-    def callback_caml(self, ros_image):  # Left camera
-        self.callback_cam(ros_image, 0)
-
-    def callback_camr(self, ros_image):  # Right camera
-        self.callback_cam(ros_image, 1)
-
-    def callback_cam(self, ros_image, index):
-        """
-        Callback function executed upon image arrival
-        """
-        # Silently(-ish) handle corrupted JPEG frames
-        try:
-            # Convert compressed ROS image to raw CV image
-            image = self.image_converter.compressed_imgmsg_to_cv2(ros_image, "rgb8")
-            # Convert from OpenCV's default BGR to RGB
-            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-            # Store image as class attribute for further use
-            self.input_camera[index] = image
-            # Get image dimensions
-            self.frame_height, self.frame_width, channels = image.shape
-            self.x_centre = self.frame_width / 2.0
-            self.y_centre = self.frame_height / 2.0
-            # Raise the flag: A new frame is available for processing
-            self.new_frame[index] = True
-        except CvBridgeError as e:
-            # Ignore corrupted frames
-            pass
-
-    def look_for_invader(self):
-        """
-        [1 of 3] Rotate MiRo if it doesn't see a ball in its current
-        position, until it sees one.
-        """
-
-        """
-        TO DO:
-        - Change all variable names and others to coincide with what you are 
-        trying to look for
-        """
-        if self.just_switched:  # Print once
-            print("MiRo is looking for the ball...")
-            self.just_switched = False
-        for index in range(2):  # For each camera (0 = left, 1 = right)
-            # Skip if there's no new image, in case the network is choking
-            if not self.new_frame[index]:
-                continue
-            image = self.input_camera[index]
-            # Run the detect ball procedure
-            self.ball[index] = self.detect_invader(image, index)
-        # If no ball has been detected
-        if not self.ball[0] and not self.ball[1]:
-            self.drive(self.SLOW, -self.SLOW)
-        else:
-            self.status_code = 2  # Switch to the second action
-            self.just_switched = True
-
-    def lock_onto_invader(self, error=25):
-        """
-        [2 of 3] Once a ball has been detected, turn MiRo to face it
-        """
-
-        """
-        TO DO:
-        - Change all variable names and others to coincide with what you are 
-        trying to lock onto
-        - Possibly make it more animalistic (stalking, walking from behind, etx.)
-        """
-        if self.just_switched:  # Print once
-            print("MiRo is locking on to the intruder")
-            self.just_switched = False
-        for index in range(2):  # For each camera (0 = left, 1 = right)
-            # Skip if there's no new image, in case the network is choking
-            if not self.new_frame[index]:
-                continue
-            image = self.input_camera[index]
-            # Run the detect ball procedure
-            self.ball[index] = self.detect_invader(image, index)
-        # If only the right camera sees the ball, rotate clockwise
-        if not self.ball[0] and self.ball[1]:
-            self.drive(self.SLOW, -self.SLOW)
-        # Conversely, rotate counter-clockwise
-        elif self.ball[0] and not self.ball[1]:
-            self.drive(-self.SLOW, self.SLOW)
-        # Make the MiRo face the ball if it's visible with both cameras
-        elif self.ball[0] and self.ball[1]:
-            error = 0.05  # 5% of image width
-            # Use the normalised values
-            left_x = self.ball[0][0]  # should be in range [0.0, 0.5]
-            right_x = self.ball[1][0]  # should be in range [-0.5, 0.0]
-            rotation_speed = 0.03  # Turn even slower now
-            if abs(left_x) - abs(right_x) > error:
-                self.drive(rotation_speed, -rotation_speed)  # turn clockwise
-            elif abs(left_x) - abs(right_x) < -error:
-                self.drive(-rotation_speed, rotation_speed)  # turn counter-clockwise
-            else:
-                # Successfully turned to face the ball
-                self.status_code = 3  # Switch to the third action
-                self.just_switched = True
-                self.bookmark = self.counter
-        # Otherwise, the ball is lost :-(
-        else:
-            self.status_code = 0  # Go back to square 1...
-            print("MiRo has lost the ball...")
-            self.just_switched = True
-
-    # Persue target
-    def persue(self):
-        """
-        [3 of 3] Once MiRO is in position, this function should drive the MiRo
-        forward until it kicks the ball!
-        """
-
-        """
-        TO DO:
-        - Change all variable names and others to coincide with what you are 
-        trying to persue
-        """
-        if self.just_switched:
-            print("MiRo is kicking the ball!")
-            self.just_switched = False
-        if self.counter <= self.bookmark + 2 / self.TICK and not self.TRANSLATION_ONLY:
-            self.drive(self.FAST, self.FAST)
-        else:
-            self.status_code = 0  # Back to the default state after the kick
-            self.just_switched = True
-
-    def detect_invader(self, frame, index):
-        """
-        Image processing operations, fine-tuned to detect a small,
-        toy blue ball in a given frame.
-        """
-
-        """
-        TO DO:
-        - Change detection to find largest red rectangle (or 
-        whatever you are trying to detect)
-            - Change from circle to rectangle
-            - Change HSV colour to red
-        - Change all variable names and others to coincide with what you are 
-        trying to detect
-        """
-        if frame is None:  # Sanity check
-            return
-
-        # Debug window to show the frame
-        if self.DEBUG:
-            cv2.imshow("camera" + str(index), frame)
-            cv2.waitKey(1)
-
-        # Flag this frame as processed, so that it's not reused in case of lag
-        self.new_frame[index] = False
-
-        processed_img = frame
-
-        for method in self.PREPROCESSING_ORDER:
-            if method == "color":
-                if self.HSV == True:
-                    # Get image in HSV (hue, saturation, value) colour format
-                    im_hsv = cv2.cvtColor(frame, cv2.COLOR_RGB2HSV)
-
-                    # Specify target ball colour
-                    rgb_colour = np.uint8([[self.COLOR_HSV]])  # e.g. Blue (Note: BGR)
-                    # Convert this colour to HSV colour model
-                    hsv_colour = cv2.cvtColor(rgb_colour, cv2.COLOR_RGB2HSV)
-
-                    # Extract colour boundaries for masking image
-                    # Get the hue value from the numpy array containing target colour
-                    target_hue = hsv_colour[0, 0][0]
-                    hsv_lo_end = np.array([target_hue - 20, 70, 70])
-                    hsv_hi_end = np.array([target_hue + 20, 255, 255])
-
-                    # Generate the mask based on the desired hue range
-                    mask = cv2.inRange(im_hsv, hsv_lo_end, hsv_hi_end)
-                    processed_img = cv2.bitwise_and(processed_img, processed_img, mask=mask)
-                else:
-                    mask = cv2.inRange(frame, self.COLOR_LOW, self.COLOR_HIGH)
-                    processed_img = cv2.bitwise_and(processed_img, processed_img, mask=mask)
-
-            elif method == "gaussian":
-                sigma1 = self.DIFFERENCE_CHECK(self.DIFFERENCE_SD_LOW)
-                sigma2 = self.DIFFERENCE_CHECK(self.DIFFERENCE_SD_HIGH)
-                img_gauss1 = cv2.GaussianBlur(processed_img, (0, 0), sigma1)
-                img_gauss2 = cv2.GaussianBlur(processed_img, (0, 0), sigma2)
-                processed_img = img_gauss1 - img_gauss2
-
-            elif method == "smooth":
-                kernel_size = (self.KERNEL_SIZE_CHECK(self.KERNEL_SIZE), self.KERNEL_SIZE_CHECK(self.KERNEL_SIZE))
-
-                if not self.GAUSSIAN_BLURRING:
-                    # average smoothing
-                    kernel = np.ones(kernel_size, np.float32) / kernel_size[0]**2
-                    processed_img = cv2.filter2D(processed_img, -1, kernel)
-
-                else:
-                    # Gaussian blurring
-                    sigma = self.STANDARD_DEVIATION_PROCESS(self.STANDARD_DEVIATION)
-                    processed_img = cv2.GaussianBlur(processed_img, (0,0), sigma) # kernel size computed as: [(sigma - 0.8)/0.3 + 1] / 0.5 + 1
-                                                                    # see opencv documentation
-
-            elif method == "edge":
-                processed_img = cv2.Canny(processed_img, self.INTENSITY_LOW, self.INTENSITY_HIGH)
-
-        # Debug window to show the mask
-        if self.DEBUG:
-            cv2.imshow("mask" + str(index), processed_img)
-            cv2.waitKey(1)
-
-        if len(processed_img.shape) == 3:
-            processed_img = cv2.cvtColor(processed_img, cv2.COLOR_BGR2GRAY)
-
-        # Debug window to show the mask
-        if self.DEBUG:
-            cv2.imshow("gray" + str(index), processed_img)
-            cv2.waitKey(1)
-
-        # Fine-tune parameters
-        ball_detect_min_dist_between_cens = 40  # Empirical
-        canny_high_thresh = 10  # Empirical
-        ball_detect_sensitivity = 10  # Lower detects more circles, so it's a trade-off
-        ball_detect_min_radius = 5  # Arbitrary, empirical
-        ball_detect_max_radius = 50  # Arbitrary, empirical
-
-        # Find circles using OpenCV routine
-        # This function returns a list of circles, with their x, y and r values
-        circles = cv2.HoughCircles(
-            processed_img,
-            cv2.HOUGH_GRADIENT,
-            1,
-            ball_detect_min_dist_between_cens,
-            param1=canny_high_thresh,
-            param2=ball_detect_sensitivity,
-            minRadius=ball_detect_min_radius,
-            maxRadius=ball_detect_max_radius,
-        )
-
-        if circles is None:
-            # If no circles were found, just display the original image
-            return
-
-        # Get the largest circle
-        max_circle = None
-        self.max_rad = 0
-        circles = np.uint16(np.around(circles))
-        for c in circles[0, :]:
-            if c[2] > self.max_rad:
-                self.max_rad = c[2]
-                max_circle = c
-        # This shouldn't happen, but you never know...
-        if max_circle is None:
-            return
-
-        # Append detected circle and its centre to the frame
-        cv2.circle(frame, (max_circle[0], max_circle[1]), max_circle[2], (0, 255, 0), 2)
-        cv2.circle(frame, (max_circle[0], max_circle[1]), 2, (0, 0, 255), 3)
-        if self.DEBUG:
-            cv2.imshow("circles" + str(index), frame)
-            cv2.waitKey(1)
-
-        # Normalise values to: x,y = [-0.5, 0.5], r = [0, 1]
-        max_circle = np.array(max_circle).astype("float32")
-        max_circle[0] -= self.x_centre
-        max_circle[0] /= self.frame_width
-        max_circle[1] -= self.y_centre
-        max_circle[1] /= self.frame_width
-        max_circle[1] *= -1.0
-        max_circle[2] /= self.frame_width
-
-        # Return a list values [x, y, r] for the largest circle
-        return [max_circle[0], max_circle[1], max_circle[2]]
-    
     def __init__(self):
-        # Initialise a new ROS node to communicate with MiRo, if needed
-        if not self.IS_MIROCODE:
-            rospy.init_node("persue_intruder", anonymous=True)
-        # Give it some time to make sure everything is initialised
-        rospy.sleep(2.0)
-        # Initialise CV Bridge
-        self.image_converter = CvBridge()
-        # Individual robot name acts as ROS topic prefix
-        topic_base_name = "/" + os.getenv("MIRO_ROBOT_NAME")
-        # Create two new subscribers to receive camera images with attached callbacks
-        self.sub_caml = rospy.Subscriber(
-            topic_base_name + "/sensors/caml/compressed",
-            CompressedImage,
-            self.callback_caml,
-            queue_size=1,
-            tcp_nodelay=True,
-        )
-        self.sub_camr = rospy.Subscriber(
-            topic_base_name + "/sensors/camr/compressed",
-            CompressedImage,
-            self.callback_camr,
-            queue_size=1,
-            tcp_nodelay=True,
-        )
-        # Create a new publisher to send velocity commands to the robot
-        self.vel_pub = rospy.Publisher(
-            topic_base_name + "/control/cmd_vel", TwistStamped, queue_size=0
-        )
-        # Create a new publisher to move the robot head
-        self.pub_kin = rospy.Publisher(
-            topic_base_name + "/control/kinematic_joints", JointState, queue_size=0
-        )
-        # Create handle to store images
-        self.input_camera = [None, None]
-        # New frame notification
-        self.new_frame = [False, False]
-        # Create variable to store a list of ball's x, y, and r values for each camera
-        self.ball = [None, None]
-        # Set the default frame width (gets updated on receiving an image)
-        self.frame_width = 640
-        # Action selector to reduce duplicate printing to the terminal
-        self.just_switched = True
-        # Bookmark
-        self.bookmark = 0
-        # Move the head to default pose
-        self.reset_head_pose()
-    
-    def loop(self):
-        """
-        Main control loop
-        """
-        print("MiRo plays ball, press CTRL+C to halt...")
-        # Main control loop iteration counter
-        self.counter = 0
-        # This switch loops through MiRo behaviours:
-        # Find ball, lock on to the ball and kick ball
-        self.status_code = 0
-        while not rospy.core.is_shutdown():
+        rospy.init_node("persue_intruder")
 
-            # Step 1. Find ball
-            if self.status_code == 1:
-                # Every once in a while, look for ball
-                if self.counter % self.CAM_FREQ == 0:
-                    self.look_for_invader()
+        self.state = STATE_PATROL
+        self.bridge = CvBridge()
+        self.image = None
+        self.cmd_pub = rospy.Publisher("/miro/rob02/platform/control/cmd_vel", TwistStamped, queue_size=1)
+        rospy.Subscriber("/miro/rob02/camera/primary/compressed", CompressedImage, self.callback_image)
 
-            # Step 2. Orient towards it
-            elif self.status_code == 2:
-                self.lock_onto_invader()
+        # Predefined patrol pattern (list of (linear, angular) commands)
+        self.patrol_commands = [(0.05, 0.0)] * 20 + [(0.0, 0.5)] * 10 + [(0.05, 0.0)] * 20 + [(0.0, -0.5)] * 10
+        self.patrol_index = 0
 
-            # Step 3. Kick!
-            elif self.status_code == 3:
-                self.persue()
+    def callback_image(self, msg):
+        try:
+            self.image = self.bridge.compressed_imgmsg_to_cv2(msg, desired_encoding="bgr8")
+        except Exception as e:
+            rospy.logwarn("Could not convert image: %s", e)
 
-            # Fall back
-            else:
-                self.status_code = 1
+    def detect_red_object(self):
+        if self.image is None:
+            return None
 
-            # Yield
-            self.counter += 1
-            rospy.sleep(self.TICK)
+        hsv = cv2.cvtColor(self.image, cv2.COLOR_BGR2HSV)
+        lower_red1 = np.array([0, 120, 70])
+        upper_red1 = np.array([10, 255, 255])
+        lower_red2 = np.array([170, 120, 70])
+        upper_red2 = np.array([180, 255, 255])
+        mask1 = cv2.inRange(hsv, lower_red1, upper_red1)
+        mask2 = cv2.inRange(hsv, lower_red2, upper_red2)
+        mask = cv2.bitwise_or(mask1, mask2)
 
-    """ ----------------------------
-    # !!!! ALL FUNCTION ABOVE ARE NOT FINAL AND WILL BE DUE TO CHANGE
-     ---------------------------- """
+        moments = cv2.moments(mask)
+        if moments['m00'] > 0:
+            cx = int(moments['m10'] / moments['m00'])
+            return cx, mask
+        return None, mask
 
-# This condition fires when the script is called directly
-if __name__ == "__main__":
-    main = MiRoClient()  # Instantiate class
-    main.loop()  # Run the main control loop
+    def tick(self):
+        result = self.detect_red_object()
+        if result:
+            cx, _ = result
+            width = self.image.shape[1]
+            error = cx - width // 2
+
+            if self.state != STATE_CHASE:
+                rospy.loginfo("Red detected. Locking on...")
+                self.state = STATE_LOCK
+
+            if self.state == STATE_LOCK:
+                if abs(error) < 30:
+                    rospy.loginfo("Target centered. Chasing...")
+                    self.state = STATE_CHASE
+                self.publish_movement(0.0, -self.ANGULAR_GAIN * error)
+
+            elif self.state == STATE_CHASE:
+                self.publish_movement(self.LINEAR_SPEED, -self.ANGULAR_GAIN * error)
+        else:
+            if self.state != STATE_PATROL:
+                rospy.loginfo("No red detected. Resuming patrol.")
+                self.state = STATE_PATROL
+            self.patrol()
+
+    def patrol(self):
+        if self.patrol_index >= len(self.patrol_commands):
+            self.patrol_index = 0  # loop
+        lin, ang = self.patrol_commands[self.patrol_index]
+        self.publish_movement(lin, ang)
+        self.patrol_index += 1
+
+    def publish_movement(self, linear, angular):
+        msg = TwistStamped()
+        msg.twist.linear.x = linear
+        msg.twist.angular.z = angular
+        self.cmd_pub.publish(msg)
+
+    def run(self):
+        rate = rospy.Rate(1 / self.TICK)
+        while not rospy.is_shutdown():
+            self.tick()
+            rate.sleep()
+
+if __name__ == '__main__':
+    try:
+        node = MiRoPatrol()
+        node.run()
+    except rospy.ROSInterruptException:
+        pass
