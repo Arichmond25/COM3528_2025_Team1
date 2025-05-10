@@ -77,18 +77,19 @@ class MiRoImageCapture:
 
     def loop(self):
         """
-        Main loop to capture images on user input.
+        Main loop to continuously capture images every second.
         """
         time.sleep(1)
-        print("Type 'capture' to save images from MiRo's cameras. Press CTRL+C to exit.")
+        print("Capturing images every second. Press CTRL+C to exit.")
+        counter = 1  # Start the counter for image filenames
+        rate = rospy.Rate(0.1)  # Set the loop rate to 1 Hz (1 second)
+
         while not rospy.is_shutdown():
-            user_input = input("Command: ").strip().lower()
-            if user_input == "capture":
-                # Save images from both cameras
-                self.save_image(self.left_image, "left_camera.jpg")
-                self.save_image(self.right_image, "right_camera.jpg")
-            else:
-                print("Unknown command. Type 'capture' to save images.")
+            # Save images from both cameras with sequential filenames
+            self.save_image(self.left_image, f"image{counter}_left.jpg")
+            self.save_image(self.right_image, f"image{counter}_right.jpg")
+            counter += 1  # Increment the counter
+            rate.sleep()  # Sleep to maintain the 1 Hz rate
 
 if __name__ == "__main__":
     try:
