@@ -4,6 +4,7 @@ import rospy
 import cv2
 from sensor_msgs.msg import CompressedImage
 from cv_bridge import CvBridge, CvBridgeError
+import time
 
 class MiRoImageCapture:
     """
@@ -15,6 +16,7 @@ class MiRoImageCapture:
 
         # Get MiRo's robot name from the environment
         topic_base_name = "/" + os.getenv("MIRO_ROBOT_NAME")
+        print(f"MiRo's robot name: {topic_base_name}")
 
         # Subscribers for left and right camera feeds
         self.sub_caml = rospy.Subscriber(
@@ -40,7 +42,8 @@ class MiRoImageCapture:
         self.right_image = None
 
         # Create the output directory if it doesn't exist
-        self.output_dir = "data/images"
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        self.output_dir = os.path.join(script_dir, "data/images")
         os.makedirs(self.output_dir, exist_ok=True)
 
     def callback_caml(self, data):
@@ -76,6 +79,7 @@ class MiRoImageCapture:
         """
         Main loop to capture images on user input.
         """
+        time.sleep(1)
         print("Type 'capture' to save images from MiRo's cameras. Press CTRL+C to exit.")
         while not rospy.is_shutdown():
             user_input = input("Command: ").strip().lower()
