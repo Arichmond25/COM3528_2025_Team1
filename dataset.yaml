@@ -1,0 +1,7 @@
+# dataset.yaml
+path: C:\Users\kitbi\University\Year3\BioRobotics\COM3528_2025_Team1\dataset # Path to your dataset folder
+train: images/train  # Training images folder
+val: images/val  # Validation images folder
+
+nc: 1  # Number of classes (e.g., 1 for "miro")
+names: ['Miro']  # Class names
