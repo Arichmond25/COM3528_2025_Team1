@@ -10,7 +10,7 @@
         value="$(optenv MIRO_DIR_MDK)/bin/${MIRO_SYSTEM}:$(optenv GAZEBO_PLUGIN_PATH)" />
 
   <!-- Load custom maze world -->
-  <arg name="world" default="$(find COM3528_2025_Team1)/sim/worlds/sim" />
+  <arg name="world" default="$(find COM3528_2025_Team1)/sim/worlds/detect_miro" />
   <arg name="gazebo_ns" default="gazebo_server" />
 
   <!-- Start Gazebo server -->
@@ -21,13 +21,13 @@
         required="true"
         args="--physics ode --verbose $(arg world)" />
 
-  <!-- Intruder (miro01) -->
+  <!-- Patrol (miro01) -->
   <env name="MIRO_ROBOT_NAME" value="miro01" />
-  <node ns="miro01" name="wander_intruder_01" pkg="COM3528_2025_Team1" type="wander_intruder.py" output="screen" />
+  <node ns="miro01" name="miro01" pkg="COM3528_2025_Team1" type="capture_image.py"  output="screen" />
 
-  <!-- Patrol (miro02) -->
+  <!-- Intruder (miro02) -->
   <env name="MIRO_ROBOT_NAME" value="miro02" />
-  <node ns="miro02" name="persue_intruder_02" pkg="COM3528_2025_Team1" type="persue_intruder.py" output="screen" />
+  <node ns="miro02" name="persue_intruder_02" pkg="COM3528_2025_Team1" type="intruder.py" output="screen" />
 
   <!-- Start Gazebo client -->
   <node name="gazebo_gui"
