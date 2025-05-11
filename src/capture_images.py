@@ -8,7 +8,7 @@ import time
 
 class MiRoImageCapture:
     """
-    A program to capture images from MiRo's cameras and save them to a directory.
+    A program to capture images from MiRo's cameras in the sim and save them to a directory.
     """
     def __init__(self):
         # Initialize ROS node
@@ -47,27 +47,18 @@ class MiRoImageCapture:
         os.makedirs(self.output_dir, exist_ok=True)
 
     def callback_caml(self, data):
-        """
-        Callback function for the left camera.
-        """
         try:
             self.left_image = self.bridge.compressed_imgmsg_to_cv2(data, "bgr8")
         except CvBridgeError as e:
             rospy.logerr(f"Left camera error: {e}")
 
     def callback_camr(self, data):
-        """
-        Callback function for the right camera.
-        """
         try:
             self.right_image = self.bridge.compressed_imgmsg_to_cv2(data, "bgr8")
         except CvBridgeError as e:
             rospy.logerr(f"Right camera error: {e}")
 
     def save_image(self, image, filename):
-        """
-        Save an image to the specified filename.
-        """
         if image is not None:
             filepath = os.path.join(self.output_dir, filename)
             cv2.imwrite(filepath, image)
@@ -77,10 +68,10 @@ class MiRoImageCapture:
 
     def loop(self):
         """
-        Main loop to continuously capture images every second.
+        Main loop to continuously capture images every 10 seconds.
         """
         time.sleep(1)
-        print("Capturing images every second. Press CTRL+C to exit.")
+        print("Capturing images every 10 seconds. Press CTRL+C to exit.")
         counter = 1  # Start the counter for image filenames
         rate = rospy.Rate(0.1)  # Set the loop rate to 1 Hz (1 second)
 

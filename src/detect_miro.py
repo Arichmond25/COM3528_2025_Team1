@@ -10,6 +10,7 @@ import os
 import cv2
 import numpy as np
 import rospy
+import time
 from sensor_msgs.msg import CompressedImage
 from geometry_msgs.msg import TwistStamped
 from cv_bridge import CvBridge, CvBridgeError
@@ -65,6 +66,8 @@ class MiRoYOLOClient:
         self.detected_miro = False
         self.miro_position_left = None
         self.miro_position_right = None
+        
+        time.sleep(3)
 
     def callback_caml(self, ros_image):
         """
@@ -122,7 +125,7 @@ class MiRoYOLOClient:
 
         # Parse results
         for result in results[0].boxes:
-            if int(result.cls) == 0:  # Assuming class 0 is "MiRo"
+            if int(result.cls) == 0:  # Class 0 is "MiRo"
                 # Get bounding box center
                 detected_miro = result.xyxy[0]
                 x_center = (detected_miro[0] + detected_miro[2]) / 2
@@ -139,8 +142,14 @@ class MiRoYOLOClient:
 
         if left_x < frame_half:
             self.drive(speed_l=base_speed, speed_r=base_speed+adjustment)
-        elif right_x > frame_half:
+            rospy.loginfo("adijusting for left")
+        else:
+            # Move forward if aligned
+            self.drive(speed_l=base_speed, speed_r=base_speed)
+            
+        if right_x > frame_half:
             self.drive(speed_l=base_speed+adjustment, speed_r=base_speed)  
+            rospy.loginfo("adijusting for right")
         else:
             # Move forward if aligned
             self.drive(speed_l=base_speed, speed_r=base_speed)
@@ -173,12 +182,12 @@ class MiRoYOLOClient:
                     self.drive(speed_l=-0.1, speed_r=0.1)  # Clockwise rotation
                 else:
                     self.drive(speed_l=0.4, speed_r=0.4)  # Move forward
-                    # Perform micro adjustments if MiRo is detected in both cameras
+                    # Micro adjustments if MiRo is detected in both cameras
                     left_x, _ = self.miro_position_left
                     right_x, _ = self.miro_position_right
                     self.micro_adjust(left_x, right_x, width=self.input_camera_left.shape[1])
             else:
-                self.drive(speed_l=-0.1, speed_r=0.1)  # Rotate in place
+                self.drive(speed_l=-0.1, speed_r=0.1)  # Rotate 
             
 
             rate.sleep()
