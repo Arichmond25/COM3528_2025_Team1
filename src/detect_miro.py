@@ -84,7 +84,7 @@ class MiRoYOLOClient:
 
         return None
 
-    def spin(self, speed=0.2):
+    def spin(self, speed=0.5):
         """
         Make MiRo spin in place.
         """
@@ -92,20 +92,24 @@ class MiRoYOLOClient:
         msg_cmd_vel.twist.angular.z = speed
         self.vel_pub.publish(msg_cmd_vel)
 
-    def move_toward(self, x_center, frame_width, speed=0.2):
+    def move_toward(self, x_center, frame_width, angular_speed=0.2, linear_speed=1):
         """
-        Rotate MiRo to center the detected MiRo in the view.
+        Rotate MiRo to position the detected MiRo on the right side of the frame
+        and drive forward toward it.
         """
         msg_cmd_vel = TwistStamped()
 
-        # Calculate error from the center of the frame
-        error = x_center - (frame_width / 2)
+        # Calculate error from the right side of the frame
+        target_position = frame_width * 0.75  # Adjust this factor to control how far right (e.g., 75% of frame width)
+        error = x_center - target_position
 
-        # Adjust angular velocity to center the detected MiRo
+        # Adjust angular velocity to position the detected MiRo on the right
         if abs(error) > 20:  # Allow a small margin of error (e.g., 20 pixels)
-            msg_cmd_vel.twist.angular.z = -0.002 * error  # Rotate to center the MiRo
+            msg_cmd_vel.twist.angular.z = -0.002 * error  # Rotate to position the MiRo
+            msg_cmd_vel.twist.linear.x = 0  # Stop forward motion while rotating
         else:
-            msg_cmd_vel.twist.angular.z = 0  # Stop rotating when centered
+            msg_cmd_vel.twist.angular.z = 0  # Stop rotating when positioned
+            msg_cmd_vel.twist.linear.x = linear_speed  # Drive forward
 
         # Publish the velocity command
         self.vel_pub.publish(msg_cmd_vel)
