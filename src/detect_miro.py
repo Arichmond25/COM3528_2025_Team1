@@ -130,6 +130,20 @@ class MiRoYOLOClient:
                 return (x_center, y_center)
 
         return None
+    
+    def micro_adjust(self, left_x, right_x, width, base_speed=0.3, adjustment=0.1):
+        """
+        Perform micro adjustments to keep MiRo aligned with the detected target.
+        """
+        frame_half = width / 2
+
+        if left_x < frame_half:
+            self.drive(speed_l=base_speed, speed_r=base_speed+adjustment)
+        elif right_x > frame_half:
+            self.drive(speed_l=base_speed+adjustment, speed_r=base_speed)  
+        else:
+            # Move forward if aligned
+            self.drive(speed_l=base_speed, speed_r=base_speed)
 
     def loop(self):
         """
@@ -159,6 +173,10 @@ class MiRoYOLOClient:
                     self.drive(speed_l=-0.1, speed_r=0.1)  # Clockwise rotation
                 else:
                     self.drive(speed_l=0.4, speed_r=0.4)  # Move forward
+                    # Perform micro adjustments if MiRo is detected in both cameras
+                    left_x, _ = self.miro_position_left
+                    right_x, _ = self.miro_position_right
+                    self.micro_adjust(left_x, right_x, width=self.input_camera_left.shape[1])
             else:
                 self.drive(speed_l=-0.1, speed_r=0.1)  # Rotate in place
             
