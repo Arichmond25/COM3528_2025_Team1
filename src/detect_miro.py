@@ -15,6 +15,11 @@ from geometry_msgs.msg import TwistStamped
 from cv_bridge import CvBridge, CvBridgeError
 from ultralytics import YOLO  # YOLOv8 library
 
+try:  # For convenience, import this util separately
+    from miro2.lib import wheel_speed2cmd_vel  # Python 3
+except ImportError:
+    from miro2.utils import wheel_speed2cmd_vel  # Python 2
+
 class MiRoYOLOClient:
     def __init__(self):
         # Initialise ROS node
@@ -31,11 +36,18 @@ class MiRoYOLOClient:
         # ROS topic base name
         topic_base_name = "/" + os.getenv("MIRO_ROBOT_NAME", "miro")
 
-        # Camera subscriber
+        # Camera subscribers
         self.sub_caml = rospy.Subscriber(
             topic_base_name + "/sensors/caml/compressed",
             CompressedImage,
             self.callback_caml,
+            queue_size=1,
+            tcp_nodelay=True,
+        )
+        self.sub_camr = rospy.Subscriber(
+            topic_base_name + "/sensors/camr/compressed",
+            CompressedImage,
+            self.callback_camr,
             queue_size=1,
             tcp_nodelay=True,
         )
@@ -46,10 +58,13 @@ class MiRoYOLOClient:
         )
 
         # Variables
-        self.input_camera = None
-        self.new_frame = False
+        self.input_camera_left = None
+        self.input_camera_right = None
+        self.new_frame_left = False
+        self.new_frame_right = False
         self.detected_miro = False
-        self.miro_position = None
+        self.miro_position_left = None
+        self.miro_position_right = None
 
     def callback_caml(self, ros_image):
         """
@@ -58,20 +73,52 @@ class MiRoYOLOClient:
         try:
             # Convert ROS image to OpenCV format
             image = self.image_converter.compressed_imgmsg_to_cv2(ros_image, "rgb8")
-            self.input_camera = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-            self.new_frame = True
+            self.input_camera_left = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            self.new_frame_left = True
         except CvBridgeError as e:
             rospy.logerr(f"CV Bridge error: {e}")
 
-    def detect_miro(self):
+    def callback_camr(self, ros_image):
+        """
+        Callback function for the right camera.
+        """
+        try:
+            # Convert ROS image to OpenCV format
+            image = self.image_converter.compressed_imgmsg_to_cv2(ros_image, "rgb8")
+            self.input_camera_right = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            self.new_frame_right = True
+        except CvBridgeError as e:
+            rospy.logerr(f"CV Bridge error: {e}")
+            
+    def drive(self, speed_l=0.1, speed_r=0.1):  # (m/sec, m/sec)
+            """
+            Wrapper to simplify driving MiRo by converting wheel speeds to cmd_vel
+            """
+            # Prepare an empty velocity command message
+            msg_cmd_vel = TwistStamped()
+
+            # Desired wheel speed (m/sec)
+            wheel_speed = [speed_l, speed_r]
+
+            # Convert wheel speed to command velocity (m/sec, Rad/sec)
+            (dr, dtheta) = wheel_speed2cmd_vel(wheel_speed)
+
+            # Update the message with the desired speed
+            msg_cmd_vel.twist.linear.x = dr
+            msg_cmd_vel.twist.angular.z = dtheta
+
+            # Publish message to control/cmd_vel topic
+            self.vel_pub.publish(msg_cmd_vel)
+
+    def detect_miro(self, input_camera):
         """
         Use YOLOv8 to detect another MiRo in the camera frame.
         """
-        if self.input_camera is None:
+        if input_camera is None:
             return None
 
         # Run YOLOv8 inference
-        results = self.model(self.input_camera)
+        results = self.model(input_camera)
 
         # Parse results
         for result in results[0].boxes:
@@ -84,36 +131,6 @@ class MiRoYOLOClient:
 
         return None
 
-    def spin(self, speed=0.5):
-        """
-        Make MiRo spin in place.
-        """
-        msg_cmd_vel = TwistStamped()
-        msg_cmd_vel.twist.angular.z = speed
-        self.vel_pub.publish(msg_cmd_vel)
-
-    def move_toward(self, x_center, frame_width, angular_speed=0.2, linear_speed=1):
-        """
-        Rotate MiRo to position the detected MiRo on the right side of the frame
-        and drive forward toward it.
-        """
-        msg_cmd_vel = TwistStamped()
-
-        # Calculate error from the right side of the frame
-        target_position = frame_width * 0.75  # Adjust this factor to control how far right (e.g., 75% of frame width)
-        error = x_center - target_position
-
-        # Adjust angular velocity to position the detected MiRo on the right
-        if abs(error) > 20:  # Allow a small margin of error (e.g., 20 pixels)
-            msg_cmd_vel.twist.angular.z = -0.002 * error  # Rotate to position the MiRo
-            msg_cmd_vel.twist.linear.x = 0  # Stop forward motion while rotating
-        else:
-            msg_cmd_vel.twist.angular.z = 0  # Stop rotating when positioned
-            msg_cmd_vel.twist.linear.x = linear_speed  # Drive forward
-
-        # Publish the velocity command
-        self.vel_pub.publish(msg_cmd_vel)
-
     def loop(self):
         """
         Main control loop.
@@ -122,24 +139,29 @@ class MiRoYOLOClient:
         rate = rospy.Rate(10)  # 10 Hz
 
         while not rospy.is_shutdown():
-            if self.new_frame:
-                # Detect MiRo in the frame
-                self.miro_position = self.detect_miro()
-                self.new_frame = False
+            if self.new_frame_left:
+                # Detect MiRo in the left camera frame
+                self.miro_position_left = self.detect_miro(self.input_camera_left)
+                self.new_frame_left = False
 
-                if self.miro_position:
-                    rospy.loginfo("MiRo detected! Moving toward it...")
-                    self.detected_miro = True
+            if self.new_frame_right:
+                # Detect MiRo in the right camera frame
+                self.miro_position_right = self.detect_miro(self.input_camera_right)
+                self.new_frame_right = False
+            
+            if self.miro_position_left or self.miro_position_right:
+                # Move forward if MiRo is detected in either frame
+                # If MiRo is not detected in the left frame, turn anticlockwise
+                if not self.miro_position_left:
+                    self.drive(speed_l=0.1, speed_r=-0.1)  # Anticlockwise rotation
+                # If MiRo is not detected in the right frame, turn clockwise
+                elif not self.miro_position_right:
+                    self.drive(speed_l=-0.1, speed_r=0.1)  # Clockwise rotation
                 else:
-                    self.detected_miro = False
-
-            if self.detected_miro and self.miro_position:
-                # Move toward the detected MiRo
-                x_center, _ = self.miro_position
-                self.move_toward(x_center, self.input_camera.shape[1])
+                    self.drive(speed_l=0.4, speed_r=0.4)  # Move forward
             else:
-                # Spin to search for MiRo
-                self.spin()
+                self.drive(speed_l=-0.1, speed_r=0.1)  # Rotate in place
+            
 
             rate.sleep()
 
