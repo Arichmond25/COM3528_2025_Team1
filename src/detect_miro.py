@@ -21,7 +21,8 @@ class MiRoYOLOClient:
         rospy.init_node("miro_yolo_detect", anonymous=True)
 
         # YOLO model path
-        self.model_path = "path/to/your/yolov8_model.pt"  # Replace with your YOLOv8 model path
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        self.model_path = os.path.join(script_dir, "yolo_model/best.pt")
         self.model = YOLO(self.model_path)
 
         # Initialise CV Bridge
@@ -76,8 +77,9 @@ class MiRoYOLOClient:
         for result in results[0].boxes:
             if int(result.cls) == 0:  # Assuming class 0 is "MiRo"
                 # Get bounding box center
-                x_center = (result.xyxy[0] + result.xyxy[2]) / 2
-                y_center = (result.xyxy[1] + result.xyxy[3]) / 2
+                detected_miro = result.xyxy[0]
+                x_center = (detected_miro[0] + detected_miro[2]) / 2
+                y_center = (detected_miro[1] + detected_miro[3]) / 2
                 return (x_center, y_center)
 
         return None
@@ -92,7 +94,7 @@ class MiRoYOLOClient:
 
     def move_toward(self, x_center, frame_width, speed=0.2):
         """
-        Move MiRo toward the detected MiRo based on its position in the frame.
+        Rotate MiRo to center the detected MiRo in the view.
         """
         msg_cmd_vel = TwistStamped()
 
@@ -100,10 +102,12 @@ class MiRoYOLOClient:
         error = x_center - (frame_width / 2)
 
         # Adjust angular velocity to center the detected MiRo
-        msg_cmd_vel.twist.angular.z = -0.002 * error
+        if abs(error) > 20:  # Allow a small margin of error (e.g., 20 pixels)
+            msg_cmd_vel.twist.angular.z = -0.002 * error  # Rotate to center the MiRo
+        else:
+            msg_cmd_vel.twist.angular.z = 0  # Stop rotating when centered
 
-        # Move forward
-        msg_cmd_vel.twist.linear.x = speed
+        # Publish the velocity command
         self.vel_pub.publish(msg_cmd_vel)
 
     def loop(self):
