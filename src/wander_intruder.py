@@ -33,7 +33,7 @@ class MiRoIntruder:
             self.step = 0
         lin, ang = self.wander_pattern[self.step]
         self.publish_movement(lin, ang)
-        print(f"[DEBUG] step {self.step}: lin={lin}, ang={ang}")
+        # print(f"[DEBUG] step {self.step}: lin={lin}, ang={ang}")
         self.step += 1
 
     def publish_movement(self, linear, angular):
