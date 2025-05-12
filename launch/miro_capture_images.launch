@@ -21,13 +21,9 @@
         required="true"
         args="--physics ode --verbose $(arg world)" />
 
-  <!-- Patrol (miro01) -->
+  <!-- (miro01) -->
   <env name="MIRO_ROBOT_NAME" value="miro01" />
-  <node ns="miro01" name="miro01" pkg="COM3528_2025_Team1" type="detect_miro.py"  output="screen" />
-
-  <!-- Intruder (miro02) -->
-  <env name="MIRO_ROBOT_NAME" value="miro02" />
-  <node ns="miro02" name="miro02" pkg="COM3528_2025_Team1" type="random_drive.py" output="screen" />
+  <node ns="miro01" name="miro01" pkg="COM3528_2025_Team1" type="capture_images.py"  output="screen" />
 
   <!-- Start Gazebo client -->
   <node name="gazebo_gui"
