@@ -23,11 +23,11 @@
 
   <!-- Intruder (miro01) -->
   <env name="MIRO_ROBOT_NAME" value="miro01" />
-  <node ns="miro01" name="wander_intruder_01" pkg="COM3528_2025_Team1" type="capture_images.py" output="screen" />
+  <node ns="miro01" name="wander_intruder_01" pkg="COM3528_2025_Team1" type="patrol_miro.py" output="screen" />
   
   <!-- Patrol (miro02) -->
-  <!-- <env name="MIRO_ROBOT_NAME" value="miro02" /> -->
-  <!-- <node ns="miro02" name="persue_intruder_02" pkg="COM3528_2025_Team1" type="wander_intruder.py" output="screen" /> -->
+  <!-- <env name="MIRO_ROBOT_NAME" value="miro02" /> 
+  <node ns="miro02" name="persue_intruder_02" pkg="COM3528_2025_Team1" type="wander_intruder.py" output="screen" /> -->
 
   <!-- Start Gazebo client -->
   <node name="gazebo_gui"
