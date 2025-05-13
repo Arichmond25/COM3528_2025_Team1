@@ -86,6 +86,21 @@ class SoundDetector:
             # Dynamic threshold is calculated and updated when new signal comes
             self.thresh = 0.03 + self.audio_engine.non_silence_thresh(self.tmp)
 
+    def callback_speech(self, msg):
+        """
+        Process speech recognition results
+        Check if any target phrases are detected
+        """
+        # Only process speech if we're not already escaping
+
+        text = msg.data.lower()
+
+        # Check if any target phrase is in the recognized text
+        for phrase in self.target_phrases:
+            if phrase in text:
+                self.target_detected(text)
+                break
+
     def target_detected(self, text):
         """
         Called when target text is detected
@@ -122,6 +137,7 @@ class SoundDetector:
 
             # Escape from the sound source (move in opposite direction)
             self.escape_from_intruder()
+
         else:
             rospy.logwarn("Target detected but could not localize sound source")
 
@@ -198,9 +214,11 @@ class SoundDetector:
         """
         Main loop for the intruder detector
         """
+
         rate = rospy.Rate(10)  # 10 Hz
 
         while not rospy.is_shutdown():
+
             # Main loop logic goes here if needed
             rate.sleep()
 
