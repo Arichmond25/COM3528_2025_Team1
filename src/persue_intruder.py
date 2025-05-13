@@ -35,11 +35,12 @@ STATE_LOCK = 1
 STATE_CHASE = 2
 STATE_PATROL = 3
 STATE_RECOVER = 4
+STATE_START = 5
 
 class MiRoPatrol:
     TICK = 0.02  # seconds
-    LINEAR_SPEED = 0.3  # Speed when driving forward (m/s)
-    ANGULAR_SPEED = 0.15 # Speed when turning (rad/s)
+    LINEAR_SPEED = 0.2  # Speed when driving forward (m/s)
+    ANGULAR_SPEED = 0.01 # Speed when turning (rad/s)
     ANGULAR_GAIN = 0.002
     TURN_DURATION = 1.5
     CENTER_TOLERANCE = 30
@@ -135,16 +136,26 @@ class MiRoPatrol:
         self.pose_sub = rospy.Subscriber(
             self.robot_name + '/sensors/odom', Odometry, self.callback_pose)
 
+        # For PID control
+        self.yaw_target = None
+        self.pid_integral = 0.0
+        self.pid_last_error = 0.0
+        self.pid_kp = 2.0    # proportional gain
+        self.pid_ki = 0.0    # integral gain
+        self.pid_kd = 0.2    # derivative gain
 
         #Patrol steps
         self.image = None
         self.pose_received = False
         self.yaw = 0
-        self.state = STATE_PATROL
+        self.state = STATE_START
         self.last_state = STATE_PATROL
 
-        self.patrol_steps = [("forward", 10), ("turn", 90), ("forward", 10), ("turn", 90),
-                             ("forward", 10), ("turn", 90), ("forward", 10), ("turn", 90)]
+        self.start_patrol_steps = [
+            ("forward", 60), ("turn", 90), ("forward", 60), ("turn", 90),]
+
+        self.patrol_steps = [("forward", 120), ("turn", 90), ("forward", 120), ("turn", 90),
+                             ("forward", 120), ("turn", 90), ("forward", 120), ("turn", 90)]
         self.current_step = 0
         self.step_timer = rospy.Time.now()
 
@@ -168,17 +179,52 @@ class MiRoPatrol:
         self.yaw = yaw
         self.pose_received = True
 
-    def execute_patrol_step(self):
-        action, value = self.patrol_steps[self.current_step]
+    def pid_correction(self, target_yaw, current_yaw, dt):
+        # Calculate shortest angle difference
+        error = math.atan2(math.sin(target_yaw - current_yaw), math.cos(target_yaw - current_yaw))
+        
+        # PID components
+        self.pid_integral += error * dt
+        derivative = (error - self.pid_last_error) / dt if dt > 0 else 0.0
+        self.pid_last_error = error
+
+        # PID output (angular correction)
+        correction = (
+            self.pid_kp * error +
+            self.pid_ki * self.pid_integral +
+            self.pid_kd * derivative
+        )
+        return correction
+
+
+    def execute_patrol_step(self, patrol_steps):
+        action, value = patrol_steps[self.current_step]
         if action == "forward":
-            self.publish_movement(self.LINEAR_SPEED, self.LINEAR_SPEED, value)
-            self.current_step = (self.current_step + 1) % len(self.patrol_steps)
+            self.yaw_target = self.yaw  # Set current heading as target
+            duration = value  # seconds to move forward
+            rate = rospy.Rate(50)  # 50 Hz control loop
+            start_time = rospy.Time.now()
+            last_time = rospy.Time.now()
+
+            while (rospy.Time.now() - start_time).to_sec() < duration and not rospy.is_shutdown():
+                now = rospy.Time.now()
+                dt = (now - last_time).to_sec()
+                last_time = now
+                correction = self.pid_correction(self.yaw_target, self.yaw, dt)
+                # Convert angular correction into wheel speed differential
+                wheel_base = 0.14  # meters
+                speed_l = self.LINEAR_SPEED - correction
+                speed_r = self.LINEAR_SPEED + correction
+                self.publish_movement(speed_l, speed_r, 0.02)  # small step
+                rate.sleep()
+
+            self.current_step = (self.current_step + 1) % len(patrol_steps)
             self.step_timer = rospy.Time.now()
             self.stop()
             rospy.sleep(0.5)
         elif action == "turn":
             self.turn_90()
-            self.current_step = (self.current_step + 1) % len(self.patrol_steps)
+            self.current_step = (self.current_step + 1) % len(patrol_steps)
             self.step_timer = rospy.Time.now()
             self.stop()
             rospy.sleep(0.5)
@@ -308,7 +354,16 @@ class MiRoPatrol:
         mask = cv2.inRange(hsv, np.array([0,100,100]), np.array([10,255,255])) |                cv2.inRange(hsv, np.array([160,100,100]), np.array([180,255,255]))
         M = cv2.moments(mask)
 
-        if 10 > 10000:
+        print(f"[INFO] State: {self.state}, Last state: {self.last_state}, Current step: {self.current_step}")
+
+        if self.state == STATE_START and self.current_step <= 3:
+            print("[INFO] Exiting start box...")
+            self.execute_patrol_step(self.start_patrol_steps)
+            if self.current_step == 0:
+                self.state = STATE_PATROL
+                self.current_step = 0
+                self.step_timer = rospy.Time.now()
+        elif 10 > 10000:
             cx = int(M["m10"] / M["m00"])
             error = cx - (self.image.shape[1] // 2)
             if abs(error) < self.CENTER_TOLERANCE:
@@ -331,7 +386,8 @@ class MiRoPatrol:
             self.state = STATE_PATROL
             if self.last_state != STATE_PATROL:
                 self.step_timer = rospy.Time.now()
-            self.execute_patrol_step()
+            print(f"[INFO] Executing patrol step {self.current_step}...")
+            self.execute_patrol_step(self.patrol_steps)
 
         self.last_state = self.state
 
@@ -404,25 +460,42 @@ class MiRoPatrol:
         rospy.sleep(0.5)
 
     def turn_90(self):
-        # Parameters
-        angular_speed = math.pi / 32  # rad/s wheel differential
-        duration = 2.15  # seconds (approximate time to turn 90 degrees)
+        if not self.pose_received:
+            rospy.logwarn("No pose received. Skipping turn.")
+            return
 
-        speed_l = -angular_speed
-        speed_r = angular_speed
-        # Determine wheel speeds for 90-degree turn
-        # if direction == "left":
-        #     speed_l = -angular_speed
-        #     speed_r = angular_speed
-        # else:
-        #     speed_l = angular_speed
-        #     speed_r = -angular_speed
+        # Calculate target yaw 90 degrees from current (in radians)
+        self.yaw_target = self.yaw + math.radians(90)
+        self.yaw_target = math.atan2(math.sin(self.yaw_target), math.cos(self.yaw_target))  # Normalize angle
 
-        rospy.loginfo(f"Turning left 90 degrees...")
-        self.publish_movement(speed_l, speed_r, duration)
+        rospy.loginfo("Starting PID turn to 90 degrees...")
+
+        rate = rospy.Rate(50)
+        last_time = rospy.Time.now()
+
+        while not rospy.is_shutdown():
+            now = rospy.Time.now()
+            dt = (now - last_time).to_sec()
+            last_time = now
+
+            # Compute correction from current to target yaw
+            correction = self.pid_correction(self.yaw_target, self.yaw, dt)
+
+            # Stop condition
+            if abs(self.yaw - self.yaw_target) < math.radians(0.5):  # ~0.5 degree tolerance
+                break
+
+            # Turn in place using angular correction
+            wheel_base = 0.14
+            speed_l = -correction * wheel_base / 2.0
+            speed_r = correction * wheel_base / 2.0
+            self.publish_movement(speed_l, speed_r, 0.02)
+
+            rate.sleep()
         self.stop()
         rospy.loginfo("Turn complete.")
-        rospy.sleep(1.0)  # Pause between turns
+        rospy.sleep(1.0)
+
 
 
 if __name__ == "__main__":
