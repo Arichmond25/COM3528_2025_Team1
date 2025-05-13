@@ -11,7 +11,7 @@ import rospy
 import miro2 as miro
 import time
 import math
-from std_msgs.msg import Int16MultiArray
+from std_msgs.msg import Int16MultiArray, String
 from geometry_msgs.msg import TwistStamped
 from node_detect_audio_engine import DetectAudioEngine
 
@@ -37,6 +37,20 @@ class SoundDetector:
         self.intruder_direction = None  # Direction in radians
         self.intruder_distance = None  # Distance estimate based on sound level
 
+        # Variables for movement control
+        self.escape_time = 2.0  # seconds to run away
+        self.start_pose = None  # Starting position before escape
+        self.alert_count = 0  # Number of alerts detected
+
+        # Audio buffer for keyword detection
+        self.audio_buffer = []
+        self.buffer_size = (
+            20  # Buffer 20 frames (about 2 seconds at 500 samples per buffer)
+        )
+
+        # Target keywords to detect in audio
+        self.target_phrases = ["intruder", "danger", "alert", "warning"]
+
         # which miro - get robot name from environment variable
         topic_base_name = "/" + os.getenv("MIRO_ROBOT_NAME")
 
@@ -48,6 +62,10 @@ class SoundDetector:
             queue_size=1,
             tcp_nodelay=True,
         )
+
+        # self.sub_speech = rospy.Subscriber(
+        #     "/speech_recognition/result", String, self.callback_speech, queue_size=10
+        # )
 
         # publishers
         self.pub_wheels = rospy.Publisher(
@@ -86,20 +104,58 @@ class SoundDetector:
             # Dynamic threshold is calculated and updated when new signal comes
             self.thresh = 0.03 + self.audio_engine.non_silence_thresh(self.tmp)
 
-    def callback_speech(self, msg):
-        """
-        Process speech recognition results
-        Check if any target phrases are detected
-        """
-        # Only process speech if we're not already escaping
+        # Add audio data to buffer for keyword spotting
+        self.update_audio_buffer(data_t)
 
-        text = msg.data.lower()
+        # Check for keywords in audio
+        if len(self.audio_buffer) >= self.buffer_size:
+            self.detect_keywords_in_audio()
 
-        # Check if any target phrase is in the recognized text
-        for phrase in self.target_phrases:
-            if phrase in text:
-                self.target_detected(text)
-                break
+    def update_audio_buffer(self, data_t):
+        """
+        Update the audio buffer with new microphone data
+        """
+        # Use the highest quality microphone data (typically head mic)
+        head_data = data_t[2][:]
+
+        # Add to buffer
+        self.audio_buffer.append(head_data)
+
+        # Keep buffer at fixed size
+        if len(self.audio_buffer) > self.buffer_size:
+            self.audio_buffer.pop(0)
+
+    def detect_keywords_in_audio(self):
+        """
+        Simple audio event detection based on energy levels
+        In a production system, you would replace this with a proper keyword detection model
+        """
+        # Combine buffer into a single array
+        audio_segment = np.concatenate(self.audio_buffer)
+
+        # Calculate energy
+        energy = np.mean(np.abs(audio_segment))
+
+        # Simple energy threshold detection (simulation of keyword detection)
+        if energy > self.energy_threshold:
+            self.consecutive_energy_frames += 1
+
+            if self.consecutive_energy_frames >= self.consecutive_frames_threshold:
+                rospy.loginfo(f"High energy audio event detected: {energy:.3f}")
+                self.consecutive_energy_frames = 0
+
+                # Simulate keyword detection
+                # In a real implementation, you would use a proper speech recognition or
+                # keyword spotting system here
+                if self.audio_event and self.audio_event[0] is not None:
+                    # Randomly "detect" a keyword for demonstration purposes
+                    # You would replace this with actual keyword detection
+                    if energy > 0.15:  # Higher threshold for "keyword detection"
+                        detected_phrase = np.random.choice(self.target_phrases)
+                        rospy.loginfo(f"Simulated keyword detected: {detected_phrase}")
+                        self.target_detected(f"Detected: {detected_phrase}")
+        else:
+            self.consecutive_energy_frames = 0
 
     def target_detected(self, text):
         """
