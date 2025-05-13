@@ -51,7 +51,7 @@ class MiRoPatrol:
 
         # Initialise CV Bridge
         self.image_converter = CvBridge()
-        self.robot_name = "/" + os.getenv("MIRO_ROBOT_NAME", "miro02")
+        self.robot_name = "/" + os.getenv("MIRO_ROBOT_NAME", "miro01")
         topic_base_name = self.robot_name
         print(f"MiRo's robot name: {topic_base_name}")
         cmd_topic = topic_base_name + "/control/cmd_vel"
@@ -109,7 +109,7 @@ class MiRoPatrol:
         # For PID control
         self.start_time = rospy.Time.now()
         self.last_time = rospy.Time.now()
-        self.yaw_target = None
+        self.yaw_target = 0
         self.pid_integral = 0.0
         self.pid_last_error = 0.0
         self.pid_kp = 2.0    # proportional gain
@@ -283,31 +283,21 @@ class MiRoPatrol:
             self.stop()
             rospy.sleep(0.5)
 
-    def execute_recovery_step(self):
+    def execute_recovery_step(self,speed_l, speed_r):
+        # Check if recovery index is more than or equal to the length of the recovery path
         if self.recovery_index >= len(self.recovery_path):
             self.state = STATE_PATROL
             self.recovery_path.clear()
+            self.recovery_index = -1
             return
+        
+        msg = TwistStamped()
+        (dr, dtheta) = wheel_speed2cmd_vel([speed_l, speed_r])
+        msg.twist.linear.x = dr
+        msg.twist.angular.z = dtheta
+        self.cmd_pub.publish(msg)
 
-        action, value = self.recovery_path[self.recovery_index]
-        elapsed = (rospy.Time.now() - self.recovery_timer).to_sec()
-        if action == "backward":
-            if elapsed < value:
-                self.publish_movement(-self.LINEAR_SPEED, -self.LINEAR_SPEED)
-            else:
-                self.recovery_index += 1
-                self.recovery_timer = rospy.Time.now()
-                self.publish_movement(0.0, 0.0)
-                rospy.sleep(0.5)
-        elif action == "turn":
-            if elapsed < self.TURN_DURATION:
-                direction = np.sign(value)
-                self.publish_movement(-direction * self.ANGULAR_SPEED, direction * self.ANGULAR_SPEED)
-            else:
-                self.recovery_index += 1
-                self.recovery_timer = rospy.Time.now()
-                self.publish_movement(0.0, 0.0)
-                rospy.sleep(0.5)
+        
 
     def reset_head_pose(self):
         """
@@ -341,6 +331,8 @@ class MiRoPatrol:
             speed_l = self.LINEAR_SPEED - correction
             speed_r = self.LINEAR_SPEED + correction
 
+        if self.state == STATE_CHASE:
+            self.recovery_path.append([-speed_l,-speed_r])
         (dr, dtheta) = wheel_speed2cmd_vel([speed_l, speed_r])
         msg.twist.linear.x = dr
         msg.twist.angular.z = dtheta
@@ -449,7 +441,10 @@ class MiRoPatrol:
             self.recovery_index = 0
             self.recovery_timer = rospy.Time.now()
         elif self.state == STATE_RECOVER:
-            self.execute_recovery_step()
+            self.execute_recovery_step(self.recovery_path[self.recovery_index][0],
+                                        self.recovery_path[self.recovery_index][1])
+            self.recovery_index += 1
+
         else:
             self.state = STATE_PATROL
             if self.last_state != STATE_PATROL:
