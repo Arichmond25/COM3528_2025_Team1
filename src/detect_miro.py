@@ -31,6 +31,10 @@ class MiRoYOLOClient:
         self.model_path = os.path.join(script_dir, "yolo_model/best.pt")
         self.model = YOLO(self.model_path)
 
+        # Detected images directory
+        self.detected_images_dir = os.path.join(script_dir, "detected_images")
+        os.makedirs(self.detected_images_dir, exist_ok=True)
+
         # Initialise CV Bridge
         self.image_converter = CvBridge()
 
@@ -115,7 +119,7 @@ class MiRoYOLOClient:
 
     def detect_miro(self, input_camera):
         """
-        Use YOLOv8 to detect another MiRo in the camera frame.
+        Use YOLOv8 to detect another MiRo in the camera frame and save the detected image.
         """
         if input_camera is None:
             return None
@@ -126,10 +130,23 @@ class MiRoYOLOClient:
         # Parse results
         for result in results[0].boxes:
             if int(result.cls) == 0:  # Class 0 is "MiRo"
-                # Get bounding box center
+                # Get bounding box coordinates
                 detected_miro = result.xyxy[0]
-                x_center = (detected_miro[0] + detected_miro[2]) / 2
-                y_center = (detected_miro[1] + detected_miro[3]) / 2
+                x_min, y_min, x_max, y_max = map(int, detected_miro)
+
+                # Crop the detected MiRo from the input image
+                cropped_image = input_camera[y_min:y_max, x_min:x_max]
+
+                # Save the cropped image
+                timestamp = int(time.time())
+                filename = f"miro_{timestamp}.jpg"
+                filepath = os.path.join(self.detected_images_dir, filename)
+                cv2.imwrite(filepath, cropped_image)
+                rospy.loginfo(f"Saved detected MiRo image: {filepath}")
+
+                # Get bounding box center
+                x_center = (x_min + x_max) / 2
+                y_center = (y_min + y_max) / 2
                 return (x_center, y_center)
 
         return None
@@ -173,6 +190,7 @@ class MiRoYOLOClient:
                 self.new_frame_right = False
             
             if self.miro_position_left or self.miro_position_right:
+
                 # Move forward if MiRo is detected in either frame
                 # If MiRo is not detected in the left frame, turn anticlockwise
                 if not self.miro_position_left:

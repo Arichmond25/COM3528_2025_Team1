@@ -43,7 +43,7 @@ class MiRoImageCapture:
 
         # Create the output directory if it doesn't exist
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        self.output_dir = os.path.join(script_dir, "data/images")
+        self.output_dir = os.path.join(script_dir, "data/new_images")
         os.makedirs(self.output_dir, exist_ok=True)
 
     def callback_caml(self, data):
@@ -72,7 +72,7 @@ class MiRoImageCapture:
         """
         time.sleep(1)
         print("Capturing images every 10 seconds. Press CTRL+C to exit.")
-        counter = 1  # Start the counter for image filenames
+        counter = 20  # Start the counter for image filenames
         rate = rospy.Rate(0.1)  # Set the loop rate to 1 Hz (1 second)
 
         while not rospy.is_shutdown():
