@@ -24,6 +24,7 @@
   <!-- Patrol (miro01) -->
   <env name="MIRO_ROBOT_NAME" value="miro01" />
   <node ns="miro01" name="miro01" pkg="COM3528_2025_Team1" type="make_sound.py"  output="screen" />
+  
 
   <!-- Intruder (miro02) -->
   <!-- <env name="MIRO_ROBOT_NAME" value="miro02" />
