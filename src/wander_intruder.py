@@ -80,10 +80,10 @@ class MiroIntruder:
         self.last_state = STATE_NAVIGATION
 
         self.start_patrol_steps = [
-            ("forward", 25), ("turn_left", 90), ("forward", 35), ("turn_left", 90),]
+            ("forward", 20), ("turn_left", 90), ("forward", 35), ("turn_left", 90)]
 
-        self.patrol_steps = [("forward", 180), ("turn_right", 90), ("forward", 180), ("turn_left", 90),
-                             ("forward", 30),]
+        self.patrol_steps = [("forward", 115), ("turn_right", 90), ("forward", 115), ("turn_left", 90),
+                             ("forward", 30)]
         self.current_step = 0
         self.step_timer = rospy.Time.now()
 
@@ -315,19 +315,8 @@ class MiroIntruder:
                 self.step_timer = rospy.Time.now()
         # Add Chase state functionality when ditected an intruder
         elif self.state == STATE_RUN:
-            # If MiRo is not detected in the left frame, turn anticlockwise
-            if not self.miro_position_left:
-                self.drive(speed_l=0.1, speed_r=-0.1)  # Anticlockwise rotation
-            # If MiRo is not detected in the right frame, turn clockwise
-            elif not self.miro_position_right:
-                self.drive(speed_l=-0.1, speed_r=0.1)  # Clockwise rotation
-            else:
-                self.drive(speed_l=0.3, speed_r=0.3)  # Move forward
-                # Micro adjustments if MiRo is detected in both cameras
-                left_x, left_y = self.miro_position_left
-                right_x, right_y = self.miro_position_right
-                self.micro_adjust(left_x, right_x, width=self.input_camera_left.shape[1])
-
+            # If MiRo is detected, run away from the patrol
+            print("[INFO] [INTRUDER] Detected an intruder! Running away...")
         # If no MiRo was chasing intruder now need to recover to patrol route 
         elif self.last_state == STATE_RUN and self.state != STATE_RUN:
             # Begin recovery
@@ -338,7 +327,6 @@ class MiroIntruder:
             self.execute_recovery_step(self.recovery_path[self.recovery_index][0],
                                         self.recovery_path[self.recovery_index][1])
             self.recovery_index += 1
-
         else:
             self.state = STATE_NAVIGATION
             if self.last_state != STATE_NAVIGATION:
