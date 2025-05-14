@@ -1,7 +1,7 @@
 # COM3528_2025_Team1
 
 ## Project Overview
-This project enables a MiRo robot to detect another MiRo robot using YOLOv8, align itself with the detected MiRo, and move toward it. The system uses ROS for communication, YOLOv8 for object detection, and OpenCV for image processing.
+TODO
 
 ---
 
@@ -72,3 +72,27 @@ The project includes the following launch files:
 - The robot's head is reset to a default position to ensure consistent camera alignment.
 
 ---
+
+## Project Structure
+
+The project is organized as follows:
+
+```
+COM3528_2025_Team1/
+├── src/
+│   ├── capture_images.py       # Script to capture images from MiRo's camera
+│   ├── detect_miro.py          # Script to detect another MiRo using YOLOv8
+│   ├── patrol_miro.py          # Script to make MiRo patrol a predefined route
+│   ├── random_drive.py         # Script to make MiRo move randomly
+│   ├── yolo_model/
+│   │   └── best.pt             # YOLOv8 trained model file
+│   └── detected_images/        # Directory to save detected MiRo images
+├── launch/
+│   ├── team1.launch            # Launch file for the `blue_world` scenario
+│   ├── detect_miro.launch      # Launch file for the `detect_miro` scenario
+├── sim/
+│   ├── worlds/
+│   │   ├── blue_world          # Custom world for the `team1.launch` file
+│   │   └── detect_miro         # Custom world for the `detect_miro.launch` file
+├── README.md                   # Project documentation
+```
