@@ -231,7 +231,6 @@ class MiroIntruder:
         (dr, dtheta) = wheel_speed2cmd_vel([speed_l, speed_r])
         msg.twist.linear.x = dr
         msg.twist.angular.z = dtheta
-        # print(f"Publishing: linear={msg.twist.linear.x:.3f}, angular={msg.twist.angular.z:.3f}")
         
         if duration is None:
             self.cmd_pub.publish(msg)
@@ -335,7 +334,6 @@ class MiroIntruder:
             self.execute_patrol_step(self.patrol_steps)
 
         self.last_state = self.state
-        print(self.recovery_path)
 
 
 
