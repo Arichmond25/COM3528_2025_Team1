@@ -10,7 +10,7 @@ This project enables a MiRo robot to detect another MiRo robot using YOLOv8, ali
 ### 1. Prerequisites
 - **Python Dependencies**: Install the required Python packages:
   ```bash
-  pip install ultralytics opencv-python numpy rospy sensor-msgs geometry-msgs cv-bridge
+  pip install ultralytics 
   ```
 
 ## Launching the System
@@ -18,9 +18,11 @@ This project enables a MiRo robot to detect another MiRo robot using YOLOv8, ali
 ### 1. Build the ROS Workspace
 Navigate to the workspace and build it:
 ```bash
-cd /home/student/mdk/catkin_ws
-catkin_make
-source devel/setup.bash
+cd /home/student/mdk/catkin_ws/src
+catkin build
+src
+cd COM3528_2025_Team1
+chmod +x src/*.py
 ```
 
 ### 2. Launch Files
@@ -30,7 +32,7 @@ The project includes the following launch files:
 #### **`team1.launch`**
 - **World Loaded**: `blue_world` world.
 - **MiRo Robots**:
-  - **`miro01`**: Runs the `capture_images.py` script, which captures images from MiRo's camera and saves them for further processing.
+  - **`miro01`**: Runs the `patrol_miro.py` script, which truns the miro into the patroler.
   - **`miro02`**: (Commented out in the file) Intended to run the `wander_intruder.py` script, which makes MiRo wander in the environment.
 - **Purpose**: Simulates a scenario where MiRo captures images in a custom world.
 - **Command**:
@@ -50,13 +52,23 @@ The project includes the following launch files:
 
 ## How It Works
 
-1. **Detection**:
-   - MiRo uses YOLOv8 to detect another MiRo in its camera frames.
-   - Detected MiRo images are saved in the `detected_images` directory.
+### 1. **Detection**
+- MiRo uses the trained YOLOv8 model to detect another MiRo in its camera frames.
 
-2. **Alignment**:
-   - MiRo rotates until the detected MiRo is centered in its view (left camera's right side and right camera's left side).
+### 2. **Alignment**
+- MiRo rotates until the detected MiRo is centered in its view (left camera's right side and right camera's left side).
 
-3. **Navigation**:
-   - MiRo moves forward when aligned with the detected MiRo.
-   - Micro adjustments are made to maintain alignment.
+### 3. **Navigation**
+- MiRo moves forward when aligned with the detected MiRo.
+- Micro adjustments are made to maintain alignment.
+
+### 4. **Patrolling (`patrol_miro.py`)**
+- MiRo follows a predefined patrol route consisting of forward movements and 90-degree turns.
+- The patrol route is defined in the `start_patrol_steps` (for exiting the start box) and `patrol_steps` (for the main patrol loop).
+- MiRo continuously scans for intruders using its left and right cameras:
+  - If an intruder is detected, MiRo transitions to the **CHASE** state and moves toward the detected MiRo.
+  - If MiRo loses sight of the intruder, it transitions to the **RECOVER** state and retraces its steps to return to the patrol route.
+- MiRo uses a PID controller to ensure smooth and accurate movements during patrol and recovery.
+- The robot's head is reset to a default position to ensure consistent camera alignment.
+
+---
