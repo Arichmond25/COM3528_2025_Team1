@@ -297,16 +297,12 @@ class MiRoPatrol:
                     rate.sleep()
 
             self.current_step = (self.current_step + 1) % len(patrol_steps)
-            print(f"length of list: {len(patrol_steps)}")
-            print(self.current_step)
             self.step_timer = rospy.Time.now()
             self.stop()
 
         elif action == "turn":
             self.turn_90()
             self.current_step = (self.current_step + 1) % len(patrol_steps)
-            print(f"length of list: {len(patrol_steps)}")
-            print(self.current_step)
             self.step_timer = rospy.Time.now()
             self.stop()
 
@@ -361,7 +357,6 @@ class MiRoPatrol:
         (dr, dtheta) = wheel_speed2cmd_vel([speed_l, speed_r])
         msg.twist.linear.x = dr
         msg.twist.angular.z = dtheta
-        # print(f"Publishing: linear={msg.twist.linear.x:.3f}, angular={msg.twist.angular.z:.3f}")
         
         if duration is None:
             self.cmd_pub.publish(msg)
