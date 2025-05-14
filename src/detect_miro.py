@@ -28,6 +28,9 @@ class MiRoYOLOClient:
 
         # YOLO model path
         script_dir = os.path.dirname(os.path.abspath(__file__))
+
+        # SIM model path = yolo_model/best.pt
+        # REAL model path = yolo_model/model_real_life.pt
         self.model_path = os.path.join(script_dir, "yolo_model/best.pt")
         self.model = YOLO(self.model_path)
 

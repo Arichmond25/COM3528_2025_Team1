@@ -12,6 +12,11 @@ TODO
   ```bash
   pip install ultralytics 
   ```
+- **Python Dependencies for running detect_miro in real life**:
+  ```bash
+  pip install ultralytics 
+  pip install torch==2.2.0 torchvision==0.17.0
+  ```
 
 ## Launching the System
 
@@ -25,7 +30,7 @@ cd COM3528_2025_Team1
 chmod +x src/*.py
 ```
 
-### 2. Launch Files
+### 2. Run In Sim
 The project includes the following launch files:
 
 
@@ -48,6 +53,13 @@ The project includes the following launch files:
 - **Command**:
   ```bash
   roslaunch COM3528_2025_Team1 detect_miro.launch
+  ```
+
+### 2. Run In Real Life 
+1. **Connect to miro**
+2. **Run:**
+```bash
+  rosrun COM3528_2025_Team1 detect_miro.py
   ```
 
 ## How It Works
