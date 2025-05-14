@@ -94,5 +94,7 @@ COM3528_2025_Team1/
 │   ├── worlds/
 │   │   ├── blue_world          # Custom world for the `team1.launch` file
 │   │   └── detect_miro         # Custom world for the `detect_miro.launch` file
+├── dataset/                    # Data set used to train the YOLOv8 model
 ├── README.md                   # Project documentation
+
 ```
