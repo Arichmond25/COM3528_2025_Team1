@@ -132,10 +132,10 @@ class MiRoPatrol:
         self.last_state = STATE_PATROL
 
         self.start_patrol_steps = [
-            ("forward", 60), ("turn", 90), ("forward", 60), ("turn", 90),]
+            ("forward", 30), ("turn", 90), ("forward", 30), ("turn", 90),]
 
-        self.patrol_steps = [("forward", 120), ("turn", 90), ("forward", 120), ("turn", 90),
-                             ("forward", 120), ("turn", 90), ("forward", 120), ("turn", 90)]
+        self.patrol_steps = [("forward", 60), ("turn", 90), ("forward", 60), ("turn", 90),
+                             ("forward", 60), ("turn", 90), ("forward", 60), ("turn", 90)]
         self.current_step = 0
         self.step_timer = rospy.Time.now()
 
@@ -265,11 +265,10 @@ class MiRoPatrol:
                 self.look_for_miro()
                 if self.state == STATE_CHASE:
                     # If MiRo is detected, stop moving go back to rate
-                    self.stop()
-                    break
-
-                self.publish_movement(self.LINEAR_SPEED, self.LINEAR_SPEED, 0.02)  # small step
-                rate.sleep()
+                    self.recovery_path.insert(0,[self.LINEAR_SPEED,self.LINEAR_SPEED])
+                else:
+                    self.publish_movement(self.LINEAR_SPEED, self.LINEAR_SPEED, 0.02)  # small step
+                    rate.sleep()
 
             self.current_step = (self.current_step + 1) % len(patrol_steps)
             self.step_timer = rospy.Time.now()
@@ -332,7 +331,7 @@ class MiRoPatrol:
             speed_r = self.LINEAR_SPEED + correction
 
         if self.state == STATE_CHASE:
-            self.recovery_path.append([-speed_l,-speed_r])
+            self.recovery_path.insert(0,[-speed_l,-speed_r])
         (dr, dtheta) = wheel_speed2cmd_vel([speed_l, speed_r])
         msg.twist.linear.x = dr
         msg.twist.angular.z = dtheta
@@ -372,7 +371,8 @@ class MiRoPatrol:
 
         while not rospy.is_shutdown():
             # Look for MiRo in the camera frames
-            self.look_for_miro()
+            #COULD LOOK FOR MIRO WHILE TURNING, BUT LOGIC IS NOT IMPLEMENTED
+            # self.look_for_miro()
 
             if self.state == STATE_CHASE:
                 # If MiRo is detected, stop moving go back to rate
