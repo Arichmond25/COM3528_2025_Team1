@@ -30,12 +30,10 @@ except ImportError:
 
 
 # State Constants
-STATE_DETECT = 0
-STATE_LOCK = 1
-STATE_CHASE = 2
-STATE_PATROL = 3
-STATE_RECOVER = 4
-STATE_START = 5
+STATE_CHASE = "chase"
+STATE_PATROL = "patrol"
+STATE_RECOVER = "recover"
+STATE_START = "start"
 
 class MiRoPatrol:
     TICK = 0.02  # seconds
@@ -47,11 +45,10 @@ class MiRoPatrol:
 
     def __init__(self):
         rospy.init_node("persue_intruder", anonymous=True)
-        rospy.sleep(1.0)
 
         # Initialise CV Bridge
         self.image_converter = CvBridge()
-        self.robot_name = "/" + os.getenv("MIRO_ROBOT_NAME", "miro01")
+        self.robot_name = "/" + os.getenv("MIRO_ROBOT_NAME","miro01")
         topic_base_name = self.robot_name
         print(f"MiRo's robot name: {topic_base_name}")
         cmd_topic = topic_base_name + "/control/cmd_vel"
@@ -63,9 +60,6 @@ class MiRoPatrol:
 
         # Initialise CV Bridge
         self.image_converter = CvBridge()
-
-        # ROS topic base name
-        topic_base_name = "/" + os.getenv("MIRO_ROBOT_NAME", "miro")
 
         # Camera subscribers
         self.sub_caml = rospy.Subscriber(
@@ -132,10 +126,10 @@ class MiRoPatrol:
         self.last_state = STATE_PATROL
 
         self.start_patrol_steps = [
-            ("forward", 30), ("turn", 90), ("forward", 30), ("turn", 90),]
+            ("forward", 40), ("turn", 90), ("forward", 32), ("turn", 90)]
 
-        self.patrol_steps = [("forward", 60), ("turn", 90), ("forward", 60), ("turn", 90),
-                             ("forward", 60), ("turn", 90), ("forward", 60), ("turn", 90)]
+        self.patrol_steps = [("forward", 90), ("turn", 90), ("forward", 90), ("turn", 90),
+                             ("forward", 90), ("turn", 90), ("forward", 90), ("turn", 90)]
         self.current_step = 0
         self.step_timer = rospy.Time.now()
 
@@ -205,27 +199,53 @@ class MiRoPatrol:
 
         if self.miro_position_left or self.miro_position_right:
             self.state = STATE_CHASE
+        else:
+            self.state = STATE_PATROL
         
 
-    def micro_adjust(self, left_x, right_x, width, base_speed=0.3, adjustment=0.1):
+    def micro_adjust(self, left_x, right_x, width, base_speed=0.3, adjustment=0.05):
         """
         Perform micro adjustments to keep MiRo aligned with the detected target.
         """
         frame_half = width / 2
 
         if left_x < frame_half:
-            self.publish_movement(speed_l=base_speed, speed_r=base_speed+adjustment)
+            self.drive(speed_l=base_speed, speed_r=base_speed+adjustment)
             rospy.loginfo("adijusting for left")
         else:
             # Move forward if aligned
-            self.publish_movement(speed_l=base_speed, speed_r=base_speed)
+            self.drive(speed_l=base_speed, speed_r=base_speed)
             
         if right_x > frame_half:
-            self.publish_movement(speed_l=base_speed+adjustment, speed_r=base_speed)  
+            self.drive(speed_l=base_speed+adjustment, speed_r=base_speed)  
             rospy.loginfo("adijusting for right")
         else:
             # Move forward if aligned
-            self.publish_movement(speed_l=base_speed, speed_r=base_speed)
+            self.drive(speed_l=base_speed, speed_r=base_speed)
+
+    def drive(self, speed_l=0.1, speed_r=0.1):  # (m/sec, m/sec)
+        """
+        Wrapper to simplify driving MiRo by converting wheel speeds to cmd_vel
+        """
+        # Prepare an empty velocity command message
+        msg_cmd_vel = TwistStamped()
+
+        # Desired wheel speed (m/sec)
+        wheel_speed = [speed_l, speed_r]
+
+        #Add velocity command to recovery path when in chase state
+        if self.state == STATE_CHASE:
+            self.recovery_path.insert(0,[-speed_l,-speed_r])
+
+        # Convert wheel speed to command velocity (m/sec, Rad/sec)
+        (dr, dtheta) = wheel_speed2cmd_vel(wheel_speed)
+
+        # Update the message with the desired speed
+        msg_cmd_vel.twist.linear.x = dr
+        msg_cmd_vel.twist.angular.z = dtheta
+
+        # Publish message to control/cmd_vel topic
+        self.cmd_pub.publish(msg_cmd_vel)
 
     def callback_pose(self, msg):
         orientation_q = msg.pose.pose.orientation
@@ -253,6 +273,8 @@ class MiRoPatrol:
 
     def execute_patrol_step(self, patrol_steps):
         action, value = patrol_steps[self.current_step]
+        
+        # Check if action is "forward" or "turn"
         if action == "forward":
             self.yaw_target = self.yaw  # Set current heading as target
             duration = value  # seconds to move forward
@@ -262,25 +284,31 @@ class MiRoPatrol:
 
             while (rospy.Time.now() - self.start_time).to_sec() < duration and not rospy.is_shutdown():
                 # Look for MiRo in the camera frames
-                self.look_for_miro()
+                if self.state != STATE_START:
+                    self.look_for_miro()
+
                 if self.state == STATE_CHASE:
-                    # If MiRo is detected, stop moving go back to rate
-                    self.recovery_path.insert(0,[self.LINEAR_SPEED,self.LINEAR_SPEED])
+                    # If MiRo is in chase state, don't publish velocity commands and add them to recovery path
+                    for i in range(int((rospy.Time.now() - self.start_time).to_sec() / 0.2)):
+                        self.recovery_path.insert(0,[self.LINEAR_SPEED,self.LINEAR_SPEED])
+                    break
                 else:
                     self.publish_movement(self.LINEAR_SPEED, self.LINEAR_SPEED, 0.02)  # small step
                     rate.sleep()
 
             self.current_step = (self.current_step + 1) % len(patrol_steps)
+            print(f"length of list: {len(patrol_steps)}")
+            print(self.current_step)
             self.step_timer = rospy.Time.now()
             self.stop()
-            rospy.sleep(0.5)
 
         elif action == "turn":
             self.turn_90()
             self.current_step = (self.current_step + 1) % len(patrol_steps)
+            print(f"length of list: {len(patrol_steps)}")
+            print(self.current_step)
             self.step_timer = rospy.Time.now()
             self.stop()
-            rospy.sleep(0.5)
 
     def execute_recovery_step(self,speed_l, speed_r):
         # Check if recovery index is more than or equal to the length of the recovery path
@@ -295,8 +323,6 @@ class MiRoPatrol:
         msg.twist.linear.x = dr
         msg.twist.angular.z = dtheta
         self.cmd_pub.publish(msg)
-
-        
 
     def reset_head_pose(self):
         """
@@ -399,57 +425,52 @@ class MiRoPatrol:
             rate.sleep()
         self.stop()
         rospy.loginfo("Turn complete.")
-        rospy.sleep(1.0)
 
 
     def tick(self):
-        print(f"[INFO] State: {self.state}, Last state: {self.last_state}, Current step: {self.current_step}")
-        
-        # Detect MiRo in the camera frame
-        self.look_for_miro()
+        print(f"[INFO] [PATROL] I am currently doing: {self.state}, Last thing I did was: {self.last_state},")
         
         # Start state is get out of the start box
-        if self.state == STATE_START and self.current_step <= 3:
+        if self.state == STATE_START:
             print("[INFO] Exiting start box...")
             self.execute_patrol_step(self.start_patrol_steps)
             if self.current_step == 0:
                 self.state = STATE_PATROL
-                self.current_step = 0
                 self.step_timer = rospy.Time.now()
+        else:
+            self.look_for_miro()
 
         # Add Chase state functionality when ditected an intruder
-        elif self.state == STATE_CHASE:
+        if self.state == STATE_CHASE:
             # If MiRo is not detected in the left frame, turn anticlockwise
             if not self.miro_position_left:
-                self.publish_movement(speed_l=0.1, speed_r=-0.1)  # Anticlockwise rotation
+                self.drive(speed_l=0.1, speed_r=-0.1)  # Anticlockwise rotation
             # If MiRo is not detected in the right frame, turn clockwise
             elif not self.miro_position_right:
-                self.publish_movement(speed_l=-0.1, speed_r=0.1)  # Clockwise rotation
+                self.drive(speed_l=-0.1, speed_r=0.1)  # Clockwise rotation
             else:
-                self.publish_movement(speed_l=0.4, speed_r=0.4)  # Move forward
+                self.drive(speed_l=0.2, speed_r=0.2)  # Move forward
                 # Micro adjustments if MiRo is detected in both cameras
                 left_x, left_y = self.miro_position_left
                 right_x, right_y = self.miro_position_right
                 self.micro_adjust(left_x, right_x, width=self.input_camera_left.shape[1])
-
         # If no MiRo was chasing intruder now need to recover to patrol route 
-        elif self.last_state == STATE_CHASE:
+        elif self.last_state == STATE_CHASE and self.state != STATE_CHASE:
             # Begin recovery
             self.state = STATE_RECOVER
             # TODO: Change state to STATE_PATROL once recovery is done
-            self.recovery_path.reverse()
             self.recovery_index = 0
             self.recovery_timer = rospy.Time.now()
         elif self.state == STATE_RECOVER:
             self.execute_recovery_step(self.recovery_path[self.recovery_index][0],
                                         self.recovery_path[self.recovery_index][1])
             self.recovery_index += 1
-
-        else:
-            self.state = STATE_PATROL
+        elif self.state == STATE_PATROL:
+            print(f"[INFO] [PATROL] I am in patrol mode, current step: {self.current_step}")
+            # Detect MiRo in the camera frame
             if self.last_state != STATE_PATROL:
                 self.step_timer = rospy.Time.now()
-            print(f"[INFO] Executing patrol step {self.current_step}...")
+            print(f"[INFO] [PATROL] Executing patrol step {self.current_step}...")
             self.execute_patrol_step(self.patrol_steps)
 
         self.last_state = self.state
