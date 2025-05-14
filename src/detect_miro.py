@@ -31,7 +31,7 @@ class MiRoYOLOClient:
 
         # SIM model path = yolo_model/best.pt
         # REAL model path = yolo_model/model_real_life.pt
-        self.model_path = os.path.join(script_dir, "yolo_model/best.pt")
+        self.model_path = os.path.join(script_dir, "yolo_model/model_best.pt")
         self.model = YOLO(self.model_path)
 
         # Detected images directory
